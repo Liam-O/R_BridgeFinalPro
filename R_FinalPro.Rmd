@@ -1,0 +1,143 @@
+---
+author: "Liam Byrne"
+date: "August 11, 2016"
+output: html_document
+---
+
+```{r setup, include=FALSE, tidy=TRUE}
+knitr::opts_chunk$set(echo = TRUE, warning=FALSE, message=FALSE, fig.align = "center", 
+                      fig.width = 8, fig.height = 8)
+
+# Running and downloading, if necessary, the required packages for this excercise
+if(!require("RCurl", character.only = TRUE, quietly = TRUE)) {
+    install.packages("RCurl")
+    library("RCurl", character.only = TRUE)
+}
+
+if(!require("scales", character.only = TRUE, quietly = TRUE)) {
+    install.packages("scales")
+    library("scales", character.only = TRUE)
+}
+
+if(!require("plyr", character.only = TRUE, quietly = TRUE)) {
+    install.packages("plyr")
+    library("plyr", character.only = TRUE)
+}
+
+if(!require("ggplot2", character.only = TRUE, quietly = TRUE)) {
+    install.packages("ggplot2")
+    library("ggplot2", character.only = TRUE)
+}
+```
+
+### R Bridge Final Project: Campaign Donations by Committees
+
+The Federal Election Commission ([FEC](http://www.fec.gov/)) provides data on committees, candidates and campaign finances for the current election cycle and for election cycles through 1980 in regards to all registered congressional, senate and presidential candidates.
+
+During this campaign year (2015-2016), committee-based  contributions are frequently front-page news stories. Committees are defined by the FEC as federal political action committees and party committees, campaign committees for presidential, house and senate candidates, as well as groups or organizations who are spending money for or against candidates for federal office. This project will take a look committee based contributions during this election cycle.
+
+#### I. Getting the Data
+The datasets are split into two parts, i.e., a [candidate master](http://www.fec.gov/finance/disclosure/metadata/DataDictionaryCandidateMaster.shtml) file and a [committee transaction](http://www.fec.gov/finance/disclosure/metadata/DataDictionaryContributionstoCandidates.shtml) file. The committee file (*committ*) contains all the transactions with a foreign key reference to the candidate, which will require the candidate master file (*cand*) to reverse the alias. Header files were also available provided by the FEC, which were used to make assembling the data easier. All the data acquired from the FEC site was imported into a GitHub repo and *getURL*, from the RCurl package, was used to get the text.
+
+```{r echo=TRUE}
+# Candidate Data HTML
+cand_f <- ("https://raw.githubusercontent.com/Liam-O/R_BridgeFinal_csv/master/cn.txt")
+#Committee Data HTML
+committ_f <- "https://raw.githubusercontent.com/Liam-O/R_BridgeFinal_csv/master/itpas2.txt"
+
+
+# Data Headers
+cand_head <- "https://raw.githubusercontent.com/Liam-O/R_BridgeFinal_csv/master/cn_header_file.csv"
+committ_head <- "https://raw.githubusercontent.com/Liam-O/R_BridgeFinal_csv/master/pas2_header_file.csv"
+
+# Read Data
+cand <- read.table(text = getURL(cand_f),
+                   header = FALSE,
+                   sep = "|",
+                   quote = "",
+                   col.names = read.csv(text = getURL(cand_head), sep = ",", header = FALSE,
+                                        stringsAsFactors = FALSE ),
+                   comment.char = "",
+                   fill = TRUE,
+                   strip.white = TRUE,
+                   stringsAsFactors = FALSE)
+committ <- read.table(text = getURL(committ_f),
+                     header = FALSE,
+                     sep = "|",
+                     quote = "",
+                     col.names = read.csv(text = getURL(committ_head), sep = ",", header = FALSE,
+                                          stringsAsFactors = FALSE ),
+                     comment.char = "",
+                     fill = TRUE,
+                     strip.white = TRUE,
+                     stringsAsFactors = FALSE)
+
+```
+
+#### II. Joining and Subsetting the Data
+The committee and candidate datasets contain much more data than is required by this routine analysis, so they both will be subset then joined using the respective candidate key, i.e. *CAND_ID*:
+```{r echo=TRUE}
+# Candidate subset for the 2016 Presidential Election
+cand_sub <- subset(cand, CAND_OFFICE == "P" & CAND_ELECTION_YR == 2016, select = c(1,2,4,6))
+# Committee subset
+committ_sub <- subset(committ, select = c(1, 4, 7, 8, 14, 15, 17))
+# The merged data frame for election donations for the 2016 presidential candidates
+elec_don <- merge(x = committ_sub, y = cand_sub, by = "CAND_ID")
+```
+Taking a look at at the campaign totals for each candidate, we see how much money each candidate was given by a committee as of June 30th, 2016 (the oldest transaction date in the dataset):
+```{r echo = TRUE}
+elec_don_sum <- aggregate(TRANSACTION_AMT ~ CAND_NAME, elec_don, FUN = sum)
+elec_don_sum <- elec_don_sum[order(-elec_don_sum$TRANSACTION_AMT),]
+row.names(elec_don_sum) <- c(1:nrow(elec_don_sum))
+elec_don_sum
+```
+From above, the number one recipient of committee funds, Jeb Bush, got pushed out of the race fairly early. The number two and four candidates, Trump and Clinton respectively, won their party's nomination. Sander's, who was in the primary almost to the end, ranks 9th in terms of committee funding. This summary of the dataset shows that the candidate that raises the most money is not necessarily the one who does the best at the ballot box. I am sure the respective committees are upset about their nearly $90 million investment in Bush who flamed out relatively early in the race.
+
+Since there were a lot of candidates in this years election,  we will look at the big two from each big party, i.e. Trump-Cruz for the Republicans and Clinton-Sanders for the Democrats. While we narrow down the dataset a bit further,  the transaction date (*TRANSACTION_DT*) formatting is a non-zero padded numeric. In order to properly do analysis with this field, we will reformat it now in a way that R will understand:
+```{r}
+# Renaming big 4 candidates:
+# TRUMP
+elec_don$CAND_NAME[elec_don$CAND_ID == "P80001571"] <- "TRUMP"
+# CRUZ
+elec_don$CAND_NAME[elec_don$CAND_ID == "P60006111"] <- "CRUZ"
+# CLINTON
+elec_don$CAND_NAME[elec_don$CAND_ID == "P00003392"] <- "CLINTON"
+# SANDERS
+elec_don$CAND_NAME[elec_don$CAND_ID == "P60007168"] <- "SANDERS"
+
+# Subset of big 4 candidates:
+elec_don <- subset(elec_don, CAND_NAME == c("TRUMP", "CRUZ", "CLINTON", "SANDERS"))
+
+# Reformat Date:
+elec_don$TRANSACTION_DT <- formatC(elec_don$TRANSACTION_DT, width = 8, format = "d", flag = "0")
+elec_don$TRANSACTION_DT <- as.Date(as.character(elec_don$TRANSACTION_DT), format = "%m%d%Y")
+
+```
+
+#### III. Viewing Data
+With our dataset structured the way we want it, ggplot will be used to view the data. As a preliminary analysis, the distribution of the funding will be views using density and box plots. Since the transactions, *TRANSACTION_AMT*, cover a large range, log scales will be used where appropriate.
+```{r}
+ggplot(data = elec_don) + geom_density(aes(x = TRANSACTION_AMT), fill = "grey50") + facet_wrap(~CAND_NAME) +
+    scale_x_log10(breaks = trans_breaks("log10", function(x) 10^x), labels = trans_format("log10", math_format(10^.x)))
+ggplot(data = elec_don, aes(x = CAND_NAME, y = TRANSACTION_AMT)) + geom_boxplot() +
+    scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x), labels = trans_format("log10", math_format(10^.x)))
+
+# Mean of the contributions to candidates:
+aggregate(TRANSACTION_AMT ~ CAND_NAME, elec_don, FUN = mean)
+
+# Median of the contributions to candidates:
+aggregate(TRANSACTION_AMT ~ CAND_NAME, elec_don, FUN = median)
+```
+From the distribution plots above, it is clear that Clinton and Cruz received the largest frequency of large checks. From the summary statistics, Cruz had the largest distribution of large checks, with a median of around $2,000, and Sanders had the smallest with was around $50. Trump received the largest average donation of around $34,000, but his median donation is only around $200. From the density plot, Trump received a large frequency of donations around $100, with few very small donations. The outliers from the very large donations pushed the median value to the right.
+
+Looking at the types of committee (*ENTITY_TYP*) contributions and the dates the money was given (*TRANSACTION_DT*) can give not only give the heartbeat of the respective campaigns during the election cycle, but the individuals/entities driving the election. The following plot, using the *facet grid* utility of the *ggplot2* package condenses all this information into one plot.
+```{r}
+ggplot(na.exclude(elec_don), aes(x = TRANSACTION_DT, y = TRANSACTION_AMT)) +
+    geom_point(aes(color = ENTITY_TP), size = 2, alpha = .5) +
+    facet_grid(~CAND_NAME) +
+    scale_y_log10(breaks = trans_breaks("log10", function(x) 10^x), labels = trans_format("log10", math_format(10^.x))) + 
+    scale_x_date(labels = date_format("%b %y")) + theme(axis.text.x = element_text(angle = 45))
+```
+From the plot above, Clinton began fundraising early on in the game with a lot of organizational entities donating well in excess of $100, while Sanders started off with a varied amount of entities donating less than $100. In the early part of the election, Cruz was getting isolated, but substantial, donations from PACs and Trump was still in the "self-funding" stage.
+
+Towards the end of the primary, Clinton was getting a large frequency of contributions of varied amounts from organizations and PACs while Sanders was still getting a moderate amount of contributions from varied entities with an increasing growth in the size of the donations from organizations and even a couple of PACs. Contributions to Cruz shot up from mostly organizational funding, probably as a result of his rival's success in the polls. The surge in funding for Cruz appeared to be a bit too late as Trump surged ahead in the delegate count. Once Cruz dropped out, Trump's "self-funding" tactic put him at a large disadvantage relative to his rival who has been getting frequent, large contributions from organizations and PACs throughout the election cycle. Only then do we see contributions from PACs, individuals and large contributions from organizations.
